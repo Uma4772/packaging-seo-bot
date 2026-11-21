@@ -70,6 +70,39 @@ class GenerateContentTests(unittest.TestCase):
         self.assertEqual(result["suggested_slug"], "custom-mailer-boxes")
         self.assertEqual(result["body_html"], "<p>Review sizing options.</p>")
 
+    def test_retries_once_after_remote_protocol_disconnect(self) -> None:
+        response_data = {
+            "title": "Custom Mailer Boxes",
+            "meta_title": "Custom Mailer Boxes",
+            "meta_description": "Packaging for shipping.",
+            "short_description": "A tailored mailer box.",
+            "body_html": "<p>Review sizing options.</p>",
+            "suggested_slug": "custom-mailer-boxes",
+            "image_search_query": "custom mailer box",
+            "keyword_ideas": ["mailer packaging", "printed mailer boxes", "shipping mailers"],
+            "image_url": "",
+        }
+
+        class FakeModels:
+            attempts = 0
+
+            def generate_content(self, **kwargs: object) -> SimpleNamespace:
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise seo_batch.RemoteProtocolError("server disconnected")
+                return SimpleNamespace(text=json.dumps(response_data))
+
+        models = FakeModels()
+        with patch.object(seo_batch.time, "sleep") as sleep:
+            result = seo_batch.generate_content(
+                SimpleNamespace(models=models),
+                "custom mailer boxes",
+            )
+
+        self.assertEqual(models.attempts, 2)
+        self.assertEqual(result["suggested_slug"], "custom-mailer-boxes")
+        sleep.assert_called_once_with(2)
+
     def test_rejects_too_few_keyword_ideas(self) -> None:
         response_data = {
             "title": "Custom Mailer Boxes",
@@ -102,6 +135,7 @@ class ClientConfigurationTests(unittest.TestCase):
 
         http_options = client_factory.call_args.kwargs["http_options"]
         retry_options = http_options.retry_options
+        self.assertEqual(http_options.timeout, 60_000)
         self.assertEqual(retry_options.attempts, 3)
         self.assertEqual(retry_options.initial_delay, 1.0)
         self.assertEqual(retry_options.max_delay, 4.0)

@@ -12,8 +12,10 @@ from pathlib import Path
 import re
 import socket
 import sys
+import time
 from urllib.parse import urlparse
 
+from httpx2 import RemoteProtocolError
 import requests
 from google import genai
 from google.genai import types
@@ -153,15 +155,31 @@ as items to confirm with the supplier. Use a short lowercase hyphenated slug.
 Provide an image search query. Set image_url to an empty string unless you know a
 direct, publicly accessible HTTPS image-file URL; never provide a search-results URL.
 """
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=SEO_SCHEMA,
-            temperature=0.4,
-        ),
-    )
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.8-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=SEO_SCHEMA,
+                temperature=0.4,
+            ),
+        )
+    except RemoteProtocolError:
+        print(
+            f"Gemini connection closed while generating {keyword}; retrying once.",
+            file=sys.stderr,
+        )
+        time.sleep(2)
+        response = client.models.generate_content(
+            model="gemini-3.8-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=SEO_SCHEMA,
+                temperature=0.4,
+            ),
+        )
     if not response.text:
         raise RuntimeError(f"Gemini returned an empty response for keyword: {keyword}")
     try:
@@ -356,6 +374,7 @@ def main() -> int:
     client = genai.Client(
         api_key=api_key,
         http_options=types.HttpOptions(
+            timeout=60_000,
             retry_options=types.HttpRetryOptions(
                 attempts=3,
                 initial_delay=1.0,
