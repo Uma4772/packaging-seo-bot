@@ -50,7 +50,12 @@ SEO_SCHEMA = {
         "body_html": {"type": "STRING"},
         "suggested_slug": {"type": "STRING"},
         "image_search_query": {"type": "STRING"},
-        "keyword_ideas": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "keyword_ideas": {
+            "type": "ARRAY",
+            "items": {"type": "STRING"},
+            "minItems": 3,
+            "maxItems": 5,
+        },
         "image_url": {"type": "STRING"},
     },
     "required": [
@@ -173,7 +178,10 @@ direct, publicly accessible HTTPS image-file URL; never provide a search-results
     ideas = data.get("keyword_ideas")
     if not isinstance(ideas, list) or not all(isinstance(item, str) and item.strip() for item in ideas):
         raise RuntimeError(f"Gemini response has invalid keyword_ideas for {keyword}")
-    data["keyword_ideas"] = [item.strip() for item in ideas]
+    normalized_ideas = [item.strip() for item in ideas]
+    if not 3 <= len(normalized_ideas) <= 5 or len({item.casefold() for item in normalized_ideas}) != len(normalized_ideas):
+        raise RuntimeError(f"Gemini response must include 3 to 5 distinct keyword_ideas for {keyword}")
+    data["keyword_ideas"] = normalized_ideas
     if not isinstance(data.get("image_url"), str):
         raise RuntimeError(f"Gemini response has invalid image_url for {keyword}")
     data["image_url"] = data["image_url"].strip()
@@ -345,7 +353,17 @@ def main() -> int:
     if webhook_url and not webhook_token:
         raise RuntimeError("Set WEBHOOK_TOKEN when GOOGLE_SHEET_WEBHOOK_URL is enabled.")
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(
+            retry_options=types.HttpRetryOptions(
+                attempts=3,
+                initial_delay=1.0,
+                max_delay=4.0,
+                http_status_codes=[408, 429, 500, 502, 503, 504],
+            )
+        ),
+    )
     rows = []
     seen_slugs: set[str] = set()
     for keyword in read_keywords():
