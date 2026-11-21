@@ -1,0 +1,39 @@
+name: Daily packaging SEO drafts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "35 4 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lightweight dependencies
+        run: python -m pip install --disable-pip-version-check requests google-genai
+
+      - name: Generate SEO drafts
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_SHEET_WEBHOOK_URL: ${{ secrets.GOOGLE_SHEET_WEBHOOK_URL }}
+          WEBHOOK_TOKEN: ${{ secrets.WEBHOOK_TOKEN }}
+        run: python scripts/generate_seo_batch.py
+
+      - name: Save local staging drafts as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: seo-staging-drafts
+          path: seo_staging/
+          if-no-files-found: error
+          retention-days: 14
